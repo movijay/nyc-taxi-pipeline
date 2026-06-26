@@ -1,0 +1,35 @@
+version: 2
+
+sources:
+  - name: nyc_tlc
+    description: "NYC Taxi and Limousine Commission raw trip data loaded from Parquet files."
+    database: "{{ env_var('DBT_DATABASE', 'nyc_taxi') }}"
+    schema: raw
+    loaded_at_field: tpep_pickup_datetime
+    freshness:
+      warn_after: {count: 1, period: day}
+      error_after: {count: 3, period: day}
+    tables:
+      - name: yellow_trips
+        description: "Yellow taxi trip records — 2023 full year, ~38M rows."
+        columns:
+          - name: tpep_pickup_datetime
+            description: "Pickup timestamp"
+          - name: tpep_dropoff_datetime
+            description: "Dropoff timestamp"
+          - name: passenger_count
+            description: "Number of passengers"
+          - name: trip_distance
+            description: "Trip distance in miles"
+          - name: PULocationID
+            description: "Pickup zone ID (join to taxi_zone_lookup)"
+          - name: DOLocationID
+            description: "Dropoff zone ID (join to taxi_zone_lookup)"
+          - name: fare_amount
+            description: "Base fare in USD"
+          - name: tip_amount
+            description: "Tip in USD"
+          - name: total_amount
+            description: "Total charged in USD"
+          - name: payment_type
+            description: "1=Credit, 2=Cash, 3=No charge, 4=Dispute"

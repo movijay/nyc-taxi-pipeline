@@ -1,0 +1,20 @@
+nyc_taxi:
+  target: dev
+  outputs:
+    # --- DuckDB (local, no account needed) ---
+    dev:
+      type: duckdb
+      path: /tmp/nyc_taxi.duckdb
+      threads: 4
+
+    # --- Snowflake (set env vars before use) ---
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'SYSADMIN') }}"
+      database: NYC_TAXI
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
+      schema: raw
+      threads: 4

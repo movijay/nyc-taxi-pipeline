@@ -1,0 +1,43 @@
+version: 2
+
+models:
+  - name: fct_trips
+    description: "Fact table — all valid, enriched yellow taxi trips for 2023."
+    columns:
+      - name: trip_id
+        description: "MD5 surrogate key"
+        tests:
+          - not_null
+          - unique
+      - name: fare_amount
+        tests: [not_null]
+      - name: total_amount
+        tests: [not_null]
+      - name: pickup_datetime
+        tests: [not_null]
+      - name: pickup_location_id
+        tests: [not_null]
+
+  - name: dim_zones
+    description: "Dimension table for NYC taxi zones."
+    columns:
+      - name: location_id
+        tests:
+          - not_null
+          - unique
+
+  - name: agg_daily_revenue
+    description: "Daily revenue aggregation."
+    columns:
+      - name: trip_date
+        tests:
+          - not_null
+          - unique
+
+  - name: agg_zone_performance
+    description: "Monthly per-zone performance with revenue rank and high-volume flag."
+    columns:
+      - name: pickup_location_id
+        tests: [not_null]
+      - name: revenue_rank
+        tests: [not_null]

@@ -1,0 +1,20 @@
+# DBT
+dbt-core==1.7.0
+dbt-duckdb==1.7.0
+dbt-snowflake==1.7.0   # optional — only needed for Snowflake target
+
+# Airflow (core + providers)
+apache-airflow==2.8.0
+apache-airflow-providers-common-sql==1.8.0
+
+# Data loading / local dev
+duckdb==0.10.0
+pandas==2.1.4
+pyarrow==14.0.1
+requests==2.31.0
+
+# PySpark (Task 4 bonus)
+pyspark==3.5.0
+
+# Utilities
+python-dotenv==1.0.0

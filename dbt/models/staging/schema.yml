@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: stg_yellow_trips
+    description: "Staged yellow taxi trips — renamed columns, cast types, duration computed."
+    columns:
+      - name: trip_id
+        description: "MD5 surrogate key"
+        tests:
+          - not_null
+          - unique
+      - name: pickup_datetime
+        tests: [not_null]
+      - name: dropoff_datetime
+        tests: [not_null]
+      - name: pickup_location_id
+        tests: [not_null]
+      - name: dropoff_location_id
+        tests: [not_null]
+      - name: trip_duration_minutes
+        tests:
+          - not_null
+          - assert_duration_in_range:
+              min_minutes: "{{ var('trip_duration_min_minutes') }}"
+              max_minutes: "{{ var('trip_duration_max_minutes') }}"
+
+  - name: stg_taxi_zones
+    description: "Staged taxi zone lookup."
+    columns:
+      - name: location_id
+        tests:
+          - not_null
+          - unique
+      - name: zone_name
+        tests: [not_null]
+      - name: borough
+        tests: [not_null]
