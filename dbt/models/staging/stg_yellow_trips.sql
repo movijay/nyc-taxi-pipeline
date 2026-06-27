@@ -18,7 +18,11 @@ renamed as (
             coalesce(cast(tpep_dropoff_datetime as varchar), '') ||
             coalesce(cast(PULocationID as varchar), '') ||
             coalesce(cast(DOLocationID as varchar), '') ||
-            coalesce(cast(fare_amount as varchar), '')
+            coalesce(cast(fare_amount as varchar), '') ||
+            coalesce(cast(tip_amount as varchar), '') ||
+            coalesce(cast(total_amount as varchar), '') ||
+            coalesce(cast(passenger_count as varchar), '') ||
+            coalesce(cast(trip_distance as varchar), '')
         ) as trip_id,
 
         -- timestamps

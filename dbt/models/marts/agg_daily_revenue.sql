@@ -19,5 +19,9 @@ select
         2
     )                                                      as tip_rate_pct
 from trips
+-- Filter to 2023 only: source data contains ~9 rows with corrupt timestamps
+-- (e.g. year 2001) which are clearly GPS/meter recording errors in the raw TLC data.
+where pickup_date >= '2023-01-01'
+  and pickup_date <= '2023-12-31'
 group by pickup_date
 order by trip_date

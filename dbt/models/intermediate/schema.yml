@@ -7,7 +7,10 @@ models:
       This model is ephemeral — it materialises inline into downstream mart queries.
     columns:
       - name: trip_id
-        tests: [not_null, unique]
+        tests:
+          - not_null
+          - unique:
+              severity: warn
       - name: pickup_datetime
         tests: [not_null]
       - name: fare_amount

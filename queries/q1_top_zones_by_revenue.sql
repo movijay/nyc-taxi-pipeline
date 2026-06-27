@@ -4,12 +4,15 @@
   Uses RANK() window function partitioned by month.
 
   Performance strategy (Snowflake X-Small):
-    - The mart table agg_zone_performance is already pre-aggregated by (zone, year, month)
-      so this query scans ~265 zones × 12 months = ~3,180 rows — effectively instant.
+    - agg_zone_performance is pre-aggregated by (zone, year, month)
+      so this query scans ~3,180 rows — effectively instant.
     - If querying fct_trips directly, cluster key on (pickup_year, pickup_month,
-      pickup_location_id) would allow micro-partition pruning to only the target month,
-      reducing scan from 38M rows to ~3M per month.
-    - On Snowflake, result caching means repeated runs in the same session are free.
+      pickup_location_id) allows micro-partition pruning to ~3M rows per month.
+    - Snowflake result caching means repeated runs are free.
+
+  Table reference:
+    Snowflake (preferred) : marts.agg_zone_performance
+    DuckDB (local dev)    : main_marts.agg_zone_performance
 */
 
 with monthly_revenue as (
@@ -23,9 +26,8 @@ with monthly_revenue as (
             partition by trip_year, trip_month
             order by total_revenue desc
         ) as revenue_rank
-    from {{ ref('agg_zone_performance') }}
-    -- If running raw SQL against the mart schema, replace with:
-    -- from marts.agg_zone_performance
+    from marts.agg_zone_performance          -- Snowflake
+    -- from main_marts.agg_zone_performance  -- DuckDB
 )
 
 select

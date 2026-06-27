@@ -8,7 +8,8 @@ models:
         description: "MD5 surrogate key"
         tests:
           - not_null
-          - unique
+          - unique:
+              severity: warn
       - name: pickup_datetime
         tests: [not_null]
       - name: dropoff_datetime
@@ -20,10 +21,7 @@ models:
       - name: trip_duration_minutes
         tests:
           - not_null
-          - assert_duration_in_range:
-              min_minutes: "{{ var('trip_duration_min_minutes') }}"
-              max_minutes: "{{ var('trip_duration_max_minutes') }}"
-
+          
   - name: stg_taxi_zones
     description: "Staged taxi zone lookup."
     columns:

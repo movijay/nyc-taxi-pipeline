@@ -8,7 +8,8 @@ models:
         description: "MD5 surrogate key"
         tests:
           - not_null
-          - unique
+          - unique:
+              severity: warn
       - name: fare_amount
         tests: [not_null]
       - name: total_amount

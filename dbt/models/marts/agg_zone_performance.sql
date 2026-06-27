@@ -35,6 +35,12 @@ zone_monthly as (
         round(sum(fare_amount), 2)              as total_revenue
 
     from trips
+    -- Filter to 2023 only: source data contains rows with corrupt timestamps
+    -- (years 2001-2009, 2022) which are GPS/meter recording errors in the raw
+    -- TLC data. Including them would pollute monthly zone rankings with
+    -- near-zero revenue months that never actually existed.
+    where pickup_date >= '2023-01-01'
+      and pickup_date <= '2023-12-31'
     group by
         pickup_location_id,
         pickup_zone,

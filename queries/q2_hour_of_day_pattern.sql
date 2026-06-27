@@ -1,7 +1,11 @@
 /*
   Q2 — Hour-of-day demand pattern (full year 2023)
   -------------------------------------------------
-  For each hour (0–23): total trips, avg fare, avg tip%, 3-hour rolling avg of trip count.
+  For each hour (0-23): total trips, avg fare, avg tip%, 3-hour rolling avg.
+
+  Table reference:
+    Snowflake (preferred) : marts.fct_trips
+    DuckDB (local dev)    : main_marts.fct_trips
 */
 
 with hourly as (
@@ -15,7 +19,8 @@ with hourly as (
             ),
             2
         )                                                               as avg_tip_pct
-    from marts.fct_trips
+    from marts.fct_trips          -- Snowflake
+    -- from main_marts.fct_trips  -- DuckDB
     group by pickup_hour
 ),
 

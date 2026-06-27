@@ -37,3 +37,4 @@ airflow.cfg
 .idea/
 .vscode/
 *.DS_Store
+local_tests/
