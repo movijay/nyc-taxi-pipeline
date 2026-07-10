@@ -9,7 +9,8 @@ models:
         tests:
           - not_null
           - unique:
-              severity: warn
+              config:
+                severity: warn
       - name: fare_amount
         tests: [not_null]
       - name: total_amount

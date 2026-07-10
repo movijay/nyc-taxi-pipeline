@@ -30,12 +30,3 @@ models:
     marts:
       +materialized: table
       +schema: marts
-
-seeds:
-  nyc_taxi:
-    taxi_zone_lookup:
-      +column_types:
-        LocationID: integer
-        Borough: varchar
-        Zone: varchar
-        service_zone: varchar
