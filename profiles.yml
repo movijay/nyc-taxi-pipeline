@@ -1,0 +1,18 @@
+user:
+  outputs:
+    default:
+      account: BNYRYWE-GM91744
+      auth_type: password
+      client_session_keep_alive: false
+      connect_retries: 3
+      connect_timeout: 30
+      database: NYC_TAXI
+      password: M@vijayva#8303
+      retry_on_database_errors: true
+      role: ACCOUNTADMIN
+      schema: RAW
+      threads: 6
+      type: snowflake
+      user: mohitvijayvargiya
+      warehouse: COMPUTE_WH
+  target: default

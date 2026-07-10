@@ -5,7 +5,7 @@
 */
 
 with source as (
-    select * from {{ ref('taxi_zone_lookup') }}
+    select * from {{ source('nyc_tlc', 'taxi_zone_lookup') }}
 ),
 
 renamed as (

@@ -11,7 +11,7 @@
     - Snowflake result caching means repeated runs are free.
 
   Table reference:
-    Snowflake (preferred) : marts.agg_zone_performance
+    Snowflake (preferred) : RAW_MARTS.agg_zone_performance
     DuckDB (local dev)    : main_marts.agg_zone_performance
 */
 
@@ -26,8 +26,8 @@ with monthly_revenue as (
             partition by trip_year, trip_month
             order by total_revenue desc
         ) as revenue_rank
-    from marts.agg_zone_performance          -- Snowflake
-    -- from main_marts.agg_zone_performance  -- DuckDB
+    from NYC_TAXI.RAW_MARTS.agg_zone_performance   -- Snowflake
+    -- from main_marts.agg_zone_performance         -- DuckDB
 )
 
 select
@@ -39,4 +39,4 @@ select
     total_revenue
 from monthly_revenue
 where revenue_rank <= 10
-order by trip_year, trip_month, revenue_rank
+order by trip_year, trip_month, revenue_rank;

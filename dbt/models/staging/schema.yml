@@ -9,7 +9,8 @@ models:
         tests:
           - not_null
           - unique:
-              severity: warn
+              config:
+                severity: warn
       - name: pickup_datetime
         tests: [not_null]
       - name: dropoff_datetime
