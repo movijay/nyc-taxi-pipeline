@@ -4,7 +4,7 @@
   For each hour (0-23): total trips, avg fare, avg tip%, 3-hour rolling avg.
 
   Table reference:
-    Snowflake (preferred) : marts.fct_trips
+    Snowflake (preferred) : RAW_MARTS.fct_trips
     DuckDB (local dev)    : main_marts.fct_trips
 */
 
@@ -19,8 +19,8 @@ with hourly as (
             ),
             2
         )                                                               as avg_tip_pct
-    from marts.fct_trips          -- Snowflake
-    -- from main_marts.fct_trips  -- DuckDB
+    from NYC_TAXI.RAW_MARTS.fct_trips          -- Snowflake
+    -- from main_marts.fct_trips               -- DuckDB
     group by pickup_hour
 ),
 
@@ -43,4 +43,4 @@ rolling as (
 
 select *
 from rolling
-order by pickup_hour
+order by pickup_hour;

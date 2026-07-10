@@ -10,7 +10,7 @@
     3. Aggregate to max gap per (date, zone)
 
   Table reference:
-    Snowflake (preferred) : marts.fct_trips
+    Snowflake (preferred) : NYC_TAXI.RAW_MARTS.fct_trips
     DuckDB (local dev)    : main_marts.fct_trips
 
   ---------------------------------------------------------------------------------
@@ -42,10 +42,8 @@ with trips_with_lag as (
             partition by pickup_date, pickup_location_id
             order by pickup_datetime
         ) as prev_dropoff_datetime
-    from marts.fct_trips          -- Snowflake
-    -- from main_marts.fct_trips  -- DuckDB
-    -- Filter to 2023 only: source contains corrupt timestamps (2001-2022)
-    -- which are GPS/meter recording errors in the raw TLC data.
+    from NYC_TAXI.RAW_MARTS.fct_trips          -- Snowflake
+    -- from main_marts.fct_trips               -- DuckDB
     where pickup_date >= '2023-01-01'
       and pickup_date <= '2023-12-31'
 ),
@@ -72,4 +70,4 @@ select
     max(gap_minutes) as max_gap_minutes
 from gaps
 group by pickup_date, pickup_location_id, pickup_zone
-order by pickup_date, max_gap_minutes desc
+order by pickup_date, max_gap_minutes desc;
