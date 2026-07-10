@@ -1,103 +1,62 @@
 """
 nyc_taxi_daily_pipeline
 -----------------------
-Airflow DAG that orchestrates the NYC Taxi DBT pipeline daily at 02:00 UTC.
+Airflow DAG that orchestrates the NYC Taxi dbt Cloud pipeline daily at 02:00 UTC.
 
-Credentials:
-  - All dbt profile credentials are injected via environment variables or
-    Airflow Connections — nothing is hardcoded here.
-  - Set AIRFLOW_CONN_DBT_SNOWFLAKE (or equivalent) in your Airflow environment.
+Architecture:
+  - Airflow (Astronomer Astro) handles scheduling and orchestration
+  - dbt Cloud handles all transformations and tests (triggered via API)
+  - Snowflake is the data warehouse
 
-Backfill:
-  - Tasks that interact with dated source files use {{ ds }} / data_interval_start
-    so backfill runs process the correct partition automatically.
+Connections required in Airflow UI:
+  - dbt_cloud_default  : dbt Cloud connection (API token)
+  - snowflake_default  : Snowflake connection (for notify task)
 """
 
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from airflow import DAG
-from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
+from airflow.providers.dbt.cloud.operators.dbt import DbtCloudRunJobOperator
 
 # ---------------------------------------------------------------------------
-# Config — override via Airflow Variables or env vars in production
+# Config
 # ---------------------------------------------------------------------------
-DBT_PROJECT_DIR = Path("/opt/airflow/dbt")
-DBT_PROFILES_DIR = Path("/opt/airflow/dbt")
-DBT_TARGET = "dev"                        # override to 'snowflake' in prod
-SOURCE_DATA_PATH = "/opt/airflow/data"    # local path where parquet files live
+DBT_CLOUD_CONN_ID = "dbt_cloud_default"
+DBT_JOB_ID        = 70506183134965        # NYC Taxi -- Run + Test job in dbt Cloud
+SNOWFLAKE_CONN_ID = "snowflake_default"
 
 DEFAULT_ARGS = {
     "owner": "data-engineering",
     "depends_on_past": False,
-    "email": ["data-alerts@yourcompany.com"],
-    "email_on_failure": True,
-    "email_on_retry": False,
-    "retries": 2,
+    "retries": 1,
     "retry_delay": timedelta(minutes=5),
+    "email_on_failure": False,
 }
 
-DBT_BASE_CMD = (
-    f"dbt --no-write-json "
-    f"--project-dir {DBT_PROJECT_DIR} "
-    f"--profiles-dir {DBT_PROFILES_DIR} "
-    f"--target {DBT_TARGET}"
-)
-
 # ---------------------------------------------------------------------------
-# Source freshness check
+# Tasks
 # ---------------------------------------------------------------------------
-def check_source_freshness(data_interval_start, **kwargs):
+def notify_success(**kwargs):
     """
-    Validates that a source Parquet file exists for the execution date.
-    Raises FileNotFoundError if missing — this prevents the DAG from proceeding
-    on missing upstream data rather than silently running on stale data.
-
-    For the 2023 monthly dataset, this checks that the monthly file for the
-    execution month exists. In a streaming / daily-file setup, swap to a daily
-    file pattern like yellow_tripdata_YYYY-MM-DD.parquet.
+    Queries Snowflake mart layer and logs a pipeline success summary.
+    Uses SnowflakeHook so no local DB required.
     """
-    ds = data_interval_start
-    expected_file = (
-        Path(SOURCE_DATA_PATH)
-        / f"yellow_tripdata_{ds.year}-{ds.month:02d}.parquet"
-    )
-    if not expected_file.exists():
-        raise FileNotFoundError(
-            f"Source file not found: {expected_file}. "
-            f"Pipeline aborted — no data to process for {ds.date()}."
-        )
+    from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 
+    hook = SnowflakeHook(snowflake_conn_id=SNOWFLAKE_CONN_ID)
+    result = hook.get_first("""
+        SELECT
+            SUM(total_trips)  AS total_trips,
+            SUM(total_fare)   AS total_fare
+        FROM NYC_TAXI.RAW_MARTS.agg_daily_revenue
+    """)
 
-def notify_success(data_interval_start, **kwargs):
-    """
-    Pulls trip count and revenue for the execution date from the mart layer
-    and logs a summary. In production, replace the print with a Slack/PagerDuty
-    notification via an Airflow hook.
-    """
-    import duckdb  # or use SnowflakeHook for Snowflake target
-
-    ds_date = data_interval_start.date()
-    con = duckdb.connect("/tmp/nyc_taxi.duckdb", read_only=True)
-    result = con.execute(
-        """
-        select total_trips, total_fare
-        from marts.agg_daily_revenue
-        where trip_date = ?
-        """,
-        [str(ds_date)],
-    ).fetchone()
-    con.close()
-
-    if result:
+    if result and result[0]:
         trips, revenue = result
-        print(
-            f"[SUCCESS] {ds_date} — "
-            f"{trips:,} trips | ${revenue:,.2f} total fare"
-        )
+        print(f"[SUCCESS] Pipeline complete -- {int(trips):,} total trips | ${float(revenue):,.2f} total fare in mart")
     else:
-        print(f"[SUCCESS] {ds_date} — no data rows found in mart (new day?).")
+        print("[SUCCESS] Pipeline complete -- mart query returned no rows (check mart build).")
 
 
 # ---------------------------------------------------------------------------
@@ -105,57 +64,28 @@ def notify_success(data_interval_start, **kwargs):
 # ---------------------------------------------------------------------------
 with DAG(
     dag_id="nyc_taxi_daily_pipeline",
-    description="NYC Taxi TLC: ingest → dbt staging → intermediate → marts → tests → notify",
-    schedule_interval="0 2 * * *",          # 02:00 UTC daily
-    start_date=datetime(2023, 1, 1),
-    catchup=True,                            # enable backfill
-    max_active_runs=3,
+    description="NYC Taxi TLC: trigger dbt Cloud run+test, then notify via Snowflake",
+    schedule_interval="0 2 * * *",   # 02:00 UTC daily
+    start_date=datetime(2024, 1, 1),
+    catchup=False,                   # no backfill -- data is already loaded
     default_args=DEFAULT_ARGS,
-    tags=["nyc-taxi", "dbt", "data-engineering"],
+    tags=["nyc-taxi", "dbt", "snowflake", "data-engineering"],
 ) as dag:
 
-    # 1. Validate source file exists for this execution date
-    t_check_freshness = PythonOperator(
-        task_id="check_source_freshness",
-        python_callable=check_source_freshness,
+    # 1. Trigger dbt Cloud job (runs dbt run + dbt test)
+    t_dbt_run = DbtCloudRunJobOperator(
+        task_id="run_dbt_pipeline",
+        dbt_cloud_conn_id=DBT_CLOUD_CONN_ID,
+        job_id=DBT_JOB_ID,
+        check_interval=30,   # poll every 30s
+        timeout=3600,        # fail if not done in 1 hour
     )
 
-    # 2. Run dbt staging models
-    t_dbt_staging = BashOperator(
-        task_id="run_dbt_staging",
-        bash_command=f"{DBT_BASE_CMD} run --select staging",
-    )
-
-    # 3. Run dbt intermediate models
-    t_dbt_intermediate = BashOperator(
-        task_id="run_dbt_intermediate",
-        bash_command=f"{DBT_BASE_CMD} run --select intermediate",
-    )
-
-    # 4. Run dbt mart models
-    t_dbt_marts = BashOperator(
-        task_id="run_dbt_marts",
-        bash_command=f"{DBT_BASE_CMD} run --select marts",
-    )
-
-    # 5. Run all dbt tests — DAG fails if any test fails
-    t_dbt_tests = BashOperator(
-        task_id="run_dbt_tests",
-        bash_command=f"{DBT_BASE_CMD} test",
-    )
-
-    # 6. Log success summary
+    # 2. Query Snowflake and log success summary
     t_notify = PythonOperator(
         task_id="notify_success",
         python_callable=notify_success,
     )
 
-    # Pipeline dependency chain
-    (
-        t_check_freshness
-        >> t_dbt_staging
-        >> t_dbt_intermediate
-        >> t_dbt_marts
-        >> t_dbt_tests
-        >> t_notify
-    )
+    # Pipeline chain
+    t_dbt_run >> t_notify
