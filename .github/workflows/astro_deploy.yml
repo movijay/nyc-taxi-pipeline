@@ -28,4 +28,4 @@ jobs:
         env:
           ASTRONOMER_API_TOKEN: ${{ secrets.ASTRO_TOKEN }}
         run: |
-          astro deploy cmrfaz23f4la501nvg87gfssw --dags --force
+          astro deploy cmrfaz23f4la501nvg87gfssw --dags --force --workspace-id cmrf9nhxu4itb01naaus61yoc
