@@ -65,9 +65,9 @@ def notify_success(**kwargs):
 with DAG(
     dag_id="nyc_taxi_daily_pipeline",
     description="NYC Taxi TLC: trigger dbt Cloud run+test, then notify via Snowflake",
-    schedule_interval="0 2 * * *",   # 02:00 UTC daily
+    schedule="0 2 * * *",              # 02:00 UTC daily (Airflow 3.x syntax)
     start_date=datetime(2024, 1, 1),
-    catchup=False,                   # no backfill -- data is already loaded
+    catchup=False,                     # no backfill -- data is already loaded
     default_args=DEFAULT_ARGS,
     tags=["nyc-taxi", "dbt", "snowflake", "data-engineering"],
 ) as dag:
