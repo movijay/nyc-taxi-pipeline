@@ -1,11 +1,12 @@
-# DBT
+# DBT (local dev only -- not used in Astronomer; dbt Cloud handles transforms)
 dbt-core==1.7.0
 dbt-duckdb==1.7.0
-dbt-snowflake==1.7.0   # optional — only needed for Snowflake target
+dbt-snowflake==1.7.0
 
-# Airflow (core + providers)
-apache-airflow==2.8.0
+# Airflow providers (Astronomer manages airflow itself -- do NOT pin apache-airflow here)
 apache-airflow-providers-common-sql==1.8.0
+apache-airflow-providers-dbt-cloud==3.10.0
+apache-airflow-providers-snowflake==5.7.1
 
 # Data loading / local dev
 duckdb==0.10.0
