@@ -15,17 +15,12 @@ jobs:
       - name: Install Astro CLI
         run: curl -sSL https://install.astronomer.io | sudo bash -s
 
-      - name: Create Astro project config
+      - name: Set Astro context
         run: |
-          mkdir -p .astro
-          cat > .astro/config.yaml << 'EOF'
-          context: ""
-          project:
-            name: nyc-taxi-pipeline
-          EOF
+          mkdir -p ~/.astro
+          echo "context: cloud.astronomer.io" > ~/.astro/config.yaml
 
       - name: Deploy DAGs to Astronomer
         env:
           ASTRONOMER_API_TOKEN: ${{ secrets.ASTRO_TOKEN }}
-        run: |
-          astro deploy cmrfaz23f4la501nvg87gfssw --dags --force --workspace-id cmrf9nhxu4itb01naaus61yoc
+        run: astro deploy cmrfaz23f4la501nvg87gfssw --dags --force
