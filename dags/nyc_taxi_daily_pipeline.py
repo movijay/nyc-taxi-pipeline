@@ -5,26 +5,29 @@ Airflow DAG that orchestrates the NYC Taxi dbt Cloud pipeline daily at 02:00 UTC
 
 Architecture:
   - Airflow (Astronomer Astro) handles scheduling and orchestration
-  - dbt Cloud handles all transformations and tests (triggered via API)
-  - Snowflake is the data warehouse
+  - dbt Cloud handles all transformations and tests (triggered via REST API)
+  - Snowflake is the data warehouse (managed by dbt Cloud)
 
-Connections required in Airflow UI:
-  - dbt_cloud_default  : dbt Cloud connection (API token)
-  - snowflake_default  : Snowflake connection (for notify task)
+No extra providers needed — uses only the built-in `requests` library.
+
+Setup required in Airflow UI (Admin → Variables):
+  - dbt_cloud_api_token  : your dbt Cloud API token
 """
 
+import time
 from datetime import datetime, timedelta
 
+import requests
 from airflow import DAG
+from airflow.models import Variable
 from airflow.operators.python import PythonOperator
-from airflow.providers.dbt.cloud.operators.dbt import DbtCloudRunJobOperator
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-DBT_CLOUD_CONN_ID = "dbt_cloud_default"
-DBT_JOB_ID        = 70506183134965        # NYC Taxi -- Run + Test job in dbt Cloud
-SNOWFLAKE_CONN_ID = "snowflake_default"
+DBT_ACCOUNT_ID = "70506183148293"
+DBT_JOB_ID     = "70506183134965"
+DBT_BASE_URL   = "https://ej165.us1.dbt.com"
 
 DEFAULT_ARGS = {
     "owner": "data-engineering",
@@ -35,28 +38,48 @@ DEFAULT_ARGS = {
 }
 
 # ---------------------------------------------------------------------------
-# Tasks
+# Task: trigger dbt Cloud job and wait for completion
 # ---------------------------------------------------------------------------
-def notify_success(**kwargs):
-    """
-    Queries Snowflake mart layer and logs a pipeline success summary.
-    Uses SnowflakeHook so no local DB required.
-    """
-    from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
+def trigger_and_wait_dbt_job(**kwargs):
+    api_token = Variable.get("dbt_cloud_api_token")
+    headers = {
+        "Authorization": f"Token {api_token}",
+        "Content-Type": "application/json",
+    }
 
-    hook = SnowflakeHook(snowflake_conn_id=SNOWFLAKE_CONN_ID)
-    result = hook.get_first("""
-        SELECT
-            SUM(total_trips)  AS total_trips,
-            SUM(total_fare)   AS total_fare
-        FROM NYC_TAXI.RAW_MARTS.agg_daily_revenue
-    """)
+    # 1. Trigger the job
+    trigger_url = f"{DBT_BASE_URL}/api/v2/accounts/{DBT_ACCOUNT_ID}/jobs/{DBT_JOB_ID}/run/"
+    resp = requests.post(
+        trigger_url,
+        headers=headers,
+        json={"cause": "Triggered by Airflow — NYC Taxi Pipeline"},
+    )
+    resp.raise_for_status()
+    run_id = resp.json()["data"]["id"]
+    print(f"[INFO] dbt Cloud job triggered. Run ID: {run_id}")
+    print(f"[INFO] Monitor at: {DBT_BASE_URL}/deploy/{DBT_ACCOUNT_ID}/runs/{run_id}")
 
-    if result and result[0]:
-        trips, revenue = result
-        print(f"[SUCCESS] Pipeline complete -- {int(trips):,} total trips | ${float(revenue):,.2f} total fare in mart")
-    else:
-        print("[SUCCESS] Pipeline complete -- mart query returned no rows (check mart build).")
+    # 2. Poll until done
+    # Status codes: 1=Queued, 2=Starting, 3=Running, 10=Success, 20=Error, 30=Cancelled
+    status_url = f"{DBT_BASE_URL}/api/v2/accounts/{DBT_ACCOUNT_ID}/runs/{run_id}/"
+    while True:
+        time.sleep(30)
+        status_resp = requests.get(status_url, headers=headers)
+        status_resp.raise_for_status()
+        run_data = status_resp.json()["data"]
+        status = run_data["status"]
+        status_label = run_data.get("status_humanized", str(status))
+        print(f"[INFO] Run {run_id} status: {status_label}")
+
+        if status == 10:
+            print("[SUCCESS] dbt Cloud job completed successfully!")
+            print(f"[INFO]    Models run:  {run_data.get('run_steps', [])}")
+            break
+        elif status in (20, 30):
+            raise Exception(
+                f"dbt Cloud job failed. Status: {status_label}. "
+                f"Check run at: {DBT_BASE_URL}/deploy/{DBT_ACCOUNT_ID}/runs/{run_id}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -64,28 +87,15 @@ def notify_success(**kwargs):
 # ---------------------------------------------------------------------------
 with DAG(
     dag_id="nyc_taxi_daily_pipeline",
-    description="NYC Taxi TLC: trigger dbt Cloud run+test, then notify via Snowflake",
-    schedule="0 2 * * *",              # 02:00 UTC daily (Airflow 3.x syntax)
+    description="NYC Taxi TLC: trigger dbt Cloud run+test via REST API, no extra providers needed",
+    schedule="0 2 * * *",             # 02:00 UTC daily (Airflow 3.x syntax)
     start_date=datetime(2024, 1, 1),
-    catchup=False,                     # no backfill -- data is already loaded
+    catchup=False,
     default_args=DEFAULT_ARGS,
     tags=["nyc-taxi", "dbt", "snowflake", "data-engineering"],
 ) as dag:
 
-    # 1. Trigger dbt Cloud job (runs dbt run + dbt test)
-    t_dbt_run = DbtCloudRunJobOperator(
+    run_dbt_pipeline = PythonOperator(
         task_id="run_dbt_pipeline",
-        dbt_cloud_conn_id=DBT_CLOUD_CONN_ID,
-        job_id=DBT_JOB_ID,
-        check_interval=30,   # poll every 30s
-        timeout=3600,        # fail if not done in 1 hour
+        python_callable=trigger_and_wait_dbt_job,
     )
-
-    # 2. Query Snowflake and log success summary
-    t_notify = PythonOperator(
-        task_id="notify_success",
-        python_callable=notify_success,
-    )
-
-    # Pipeline chain
-    t_dbt_run >> t_notify
