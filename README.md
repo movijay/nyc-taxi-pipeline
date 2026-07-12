@@ -1,6 +1,6 @@
 # NYC Taxi TLC Data Engineering Assessment
 
-End-to-end pipeline: **DBT -> Airflow -> SQL analytics -> PySpark** over the NYC TLC Yellow Taxi 2023 dataset (~38M rows).
+End-to-end pipeline: **Snowflake + dbt Cloud + Airflow (Astronomer) + GitHub Actions + PySpark** over the NYC TLC Yellow Taxi 2023 dataset (~38M rows).
 
 ---
 
@@ -80,76 +80,254 @@ Raw Parquet (Snowflake Internal Stage)
 
 ## Setup Instructions
 
-> **Note:** Original assessment described DuckDB + local Airflow. This implementation uses **Snowflake + dbt Cloud + Astronomer + GitHub Actions**.
+> **Note:** Original assessment described DuckDB + local Airflow. This implementation uses **Snowflake + dbt Cloud + Astronomer + GitHub Actions** -- a production-grade cloud stack with no local infrastructure required.
 
-### 1. Clone the repository
+### Prerequisites
+
+You need free accounts for all four services before starting:
+
+| Service | Sign up | What it's used for |
+|---|---|---|
+| [Snowflake](https://signup.snowflake.com/) | Free 30-day trial | Data warehouse (raw + transformed data) |
+| [dbt Cloud](https://cloud.getdbt.com/signup/) | Free Developer tier | SQL transformation + testing |
+| [Astronomer](https://www.astronomer.io/) | Free trial | Managed Airflow (DAG orchestration) |
+| [GitHub](https://github.com/) | Free | Repo hosting + CI/CD via GitHub Actions |
+| [Kaggle](https://www.kaggle.com/) | Free | PySpark bonus notebook only |
+
+---
+
+### Step 1 -- Clone the repository
 
 ```bash
 git clone https://github.com/<your-org>/nyc-taxi-pipeline.git
 cd nyc-taxi-pipeline
+pip install -r requirements.txt
 ```
 
-### 2. Load data into Snowflake
+---
+
+### Step 2 -- Set up Snowflake
+
+Log in to Snowflake and open a **Worksheet**. Run all of the following in order:
 
 ```sql
-CREATE OR REPLACE DATABASE nyc_taxi;
-CREATE OR REPLACE SCHEMA nyc_taxi.raw;
-CREATE OR REPLACE STAGE nyc_taxi.raw.tlc_stage;
+-- 1. Create a virtual warehouse (compute engine, auto-pauses after 60s idle)
+CREATE WAREHOUSE IF NOT EXISTS nyc_taxi_wh
+  WAREHOUSE_SIZE = 'X-SMALL'
+  AUTO_SUSPEND   = 60
+  AUTO_RESUME    = TRUE;
 
-PUT file:///path/to/yellow_tripdata_2023-01.parquet @nyc_taxi.raw.tlc_stage;
--- repeat for all 12 months
+-- 2. Create database and schemas
+CREATE DATABASE IF NOT EXISTS nyc_taxi;
+CREATE SCHEMA   IF NOT EXISTS nyc_taxi.raw;
+CREATE SCHEMA   IF NOT EXISTS nyc_taxi.analytics;
 
+-- 3. Create internal stage (Snowflake's managed file store -- no S3 needed)
+CREATE STAGE IF NOT EXISTS nyc_taxi.raw.tlc_stage;
+
+-- 4. Create the raw table that will receive the Parquet data
+CREATE TABLE IF NOT EXISTS nyc_taxi.raw.yellow_trips (
+  VendorID              INTEGER,
+  tpep_pickup_datetime  TIMESTAMP_NTZ,
+  tpep_dropoff_datetime TIMESTAMP_NTZ,
+  passenger_count       FLOAT,
+  trip_distance         FLOAT,
+  RatecodeID            FLOAT,
+  store_and_fwd_flag    VARCHAR,
+  PULocationID          INTEGER,
+  DOLocationID          INTEGER,
+  payment_type          INTEGER,
+  fare_amount           FLOAT,
+  extra                 FLOAT,
+  mta_tax               FLOAT,
+  tip_amount            FLOAT,
+  tolls_amount          FLOAT,
+  improvement_surcharge FLOAT,
+  total_amount          FLOAT,
+  congestion_surcharge  FLOAT,
+  airport_fee           FLOAT
+);
+```
+
+**Download the data** from [NYC TLC Trip Record Data](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) -- download all 12 monthly Yellow Taxi Parquet files for 2023.
+
+**Upload to Snowflake** using SnowSQL ([install guide](https://docs.snowflake.com/en/user-guide/snowsql-install-config)) or the Snowflake web UI file upload:
+
+```sql
+-- Run once per file (repeat for all 12 months)
+PUT file:///C:/Downloads/yellow_tripdata_2023-01.parquet @nyc_taxi.raw.tlc_stage AUTO_COMPRESS=TRUE;
+PUT file:///C:/Downloads/yellow_tripdata_2023-02.parquet @nyc_taxi.raw.tlc_stage AUTO_COMPRESS=TRUE;
+-- ... repeat through 2023-12
+
+-- Load all staged files into the raw table in one command
 COPY INTO nyc_taxi.raw.yellow_trips
 FROM @nyc_taxi.raw.tlc_stage
-FILE_FORMAT = (TYPE = PARQUET USE_LOGICAL_TYPE = TRUE)
-MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
+FILE_FORMAT = (
+  TYPE                = PARQUET
+  USE_LOGICAL_TYPE    = TRUE      -- preserves TIMESTAMP columns correctly
+)
+MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;  -- handles column name casing across files
+
+-- Verify: should show ~38.3M rows
+SELECT COUNT(*) FROM nyc_taxi.raw.yellow_trips;
 ```
 
+> **Why `USE_LOGICAL_TYPE = TRUE`?** Without it, timestamp columns arrive as raw int64 microseconds. All downstream date filtering and partitioning would break silently.
+
+---
+
+### Step 3 -- Set up dbt Cloud
+
+1. Sign in to [dbt Cloud](https://cloud.getdbt.com/) and create a **New Project**.
+2. Connect your GitHub repo when prompted (authorise the GitHub OAuth app).
+3. Set **Project subdirectory** to `dbt/`.
+4. Create a **Snowflake connection** (Settings -> Connections -> New Connection) with these values:
+
+   | Field | Value |
+   |---|---|
+   | Account | Your Snowflake account ID (e.g. `abc12345.us-east-1`) -- found in your Snowflake URL |
+   | Database | `nyc_taxi` |
+   | Schema | `analytics` |
+   | Warehouse | `nyc_taxi_wh` |
+   | Role | `SYSADMIN` (or any role with USAGE on warehouse + database) |
+   | User / Password | Your Snowflake login credentials |
+
+5. Click **Test Connection** in dbt Cloud to confirm it works.
+6. The `generate_schema_name.sql` macro is already in `dbt/macros/` -- no changes needed.
+7. Create a **dbt Cloud Job** (Deploy -> Jobs -> Create Job):
+   - Name: `NYC Taxi Daily Pipeline`
+   - Commands (in this order): `dbt deps`, `dbt seed`, `dbt run`, `dbt test`
+   - Environment: Production
+   - Schedule: daily (or leave as manual trigger for now)
+8. **Copy your Job ID** from the job URL: `cloud.getdbt.com/deploy/ACCOUNT_ID/projects/PROJECT_ID/jobs/`**`JOB_ID`**
+9. Generate a **dbt Cloud API token**: Account Settings -> API Tokens -> Personal tokens -> New token. Copy it -- needed for Airflow in Step 4.
+
+**Trigger a manual run** to verify. Expected output:
+```
+dbt run  -> 6 models completed (PASS=6 WARN=0 ERROR=0)
+dbt test -> 29 tests passing,  0 warnings, 0 errors
+```
+
+![dbt Run Success](docs/screenshots/dbt_run_success.png)
+
+---
+
+### Step 4 -- Deploy to Astronomer
+
+**Install the Astro CLI:**
 ```bash
-curl -o dbt/seeds/taxi_zone_lookup.csv \
-  https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv
+# macOS
+brew install astro
+
+# Windows (PowerShell as Administrator)
+winget install -e --id Astronomer.Astro
+
+# Linux
+curl -sSL install.astronomer.io | sudo bash -s
 ```
 
-### 3. Configure dbt Cloud
+**Log in and deploy:**
+```bash
+astro login         # opens browser -- log in with your Astronomer account
+astro deploy --dags # uploads only the dags/ folder (~11 seconds)
+```
 
-1. Create a dbt Cloud account and connect your GitHub repo.
-2. Set **Project subdirectory** to `dbt/`.
-3. Create a Snowflake connection with your credentials.
-4. The `generate_schema_name.sql` macro is already in `dbt/macros/`.
-5. Create a **dbt Cloud Job**: `dbt deps` -> `dbt seed` -> `dbt run` -> `dbt test`
-6. Note the **Job ID** and generate an **API token**.
+**Configure connections and variables in the Astronomer UI** (your Deployment -> Open Airflow -> Admin):
 
-### 4. Deploy to Astronomer
+*Admin -> Connections -> Add Connection:*
 
-1. Install: `curl -sSL install.astronomer.io | sudo bash -s`
-2. Login: `astro login`
-3. Astronomer UI: create a Deployment, enable **DAG-only deploys**.
-4. Set Airflow Variables: `dbt_cloud_api_token`, `dbt_cloud_account_id`, `dbt_cloud_job_id`
-5. Deploy: `astro deploy --dags`
+| Conn ID | Type | Details |
+|---|---|---|
+| `snowflake_default` | Snowflake | Account, Database: `nyc_taxi`, Schema: `analytics`, Warehouse: `nyc_taxi_wh`, login/password |
+| `dbt_cloud_default` | HTTP | Host: `https://cloud.getdbt.com`, Password: dbt Cloud API token from Step 3 |
 
-### 5. Configure GitHub Actions
+*Admin -> Variables -> Add Variable:*
 
-1. Astronomer -> Workspace Settings -> API Tokens -> create **Workspace Owner** token.
-2. Add as GitHub secret: **`ASTRO_API_TOKEN`**
-3. `.github/workflows/astro_deploy.yml` is already configured.
+| Key | Value |
+|---|---|
+| `dbt_cloud_api_token` | Your dbt Cloud API token (from Step 3) |
+| `dbt_cloud_account_id` | Your dbt Cloud account ID (from the URL when logged in to dbt Cloud) |
+| `dbt_cloud_job_id` | Your dbt Cloud Job ID (from Step 3) |
+
+> **DAG-only deploys** (`astro deploy --dags`) push only the `dags/` folder and complete in ~11 seconds. A full image deploy (needed when you change `requirements.txt`) takes 3-8 minutes.
+
+![Astronomer Deployment](docs/screenshots/astronomer_deployment.png)
+
+---
+
+### Step 5 -- Set up GitHub Actions CI/CD
+
+This automatically deploys any DAG changes to Astronomer every time you push to `main`.
+
+1. In Astronomer UI: Workspace Settings -> API Tokens -> Create token -> Role: **Workspace Owner** -> copy the token.
+2. In your GitHub repo: Settings -> Secrets and Variables -> Actions -> **New repository secret**:
+   - Name: `ASTRO_API_TOKEN`
+   - Value: the token from step 1
+3. The file `.github/workflows/astro_deploy.yml` is already in the repo -- no changes needed.
+4. Push any change to `main` to test: the **Actions** tab will show the deploy completing in ~11 seconds.
 
 ![GitHub Actions Detail](docs/screenshots/github_actions_detail.png)
 *Successful GitHub Actions run -- ~11 seconds*
 
-### 6. Trigger the pipeline
+---
 
-Astronomer UI -> Deployment -> Open Airflow -> trigger `run_dbt_pipeline`. Completes in ~4-5 minutes.
+### Step 6 -- Trigger the full pipeline
 
-### 7. Run SQL analytics queries
+In Astronomer UI -> your Deployment -> **Open Airflow** -> find `run_dbt_pipeline` -> toggle it **On** -> click the play button to trigger manually.
 
-All queries in `queries/` -- run in Snowflake Snowsight.
+The DAG runs 4 tasks sequentially:
+1. `trigger_dbt_job` -- calls dbt Cloud REST API to start the job
+2. `poll_dbt_status` -- polls every 30 seconds until dbt reports success (status 10)
+3. `validate_row_counts` -- queries Snowflake to confirm row counts are healthy
+4. `notify_success` -- posts completion summary (optional Slack webhook)
 
-### 8. Run PySpark -- Historical Processing 2009-2023 (bonus)
+Total runtime: **~4 minutes 37 seconds**.
 
-**Kaggle Notebook** (recommended -- no local setup):
-Open `spark/kaggle_historical_demo.ipynb` at [kaggle.com/code](https://kaggle.com/code) and run all cells.
+![Airflow DAG Run](docs/screenshots/airflow_dag_run.png)
 
-**Local run**:
+---
+
+### Step 7 -- Run SQL analytics queries
+
+All three queries are in `queries/`. Run them directly in **Snowflake Snowsight** (the web SQL editor):
+
+| File | What it answers | Runtime |
+|---|---|---|
+| `q1_borough_revenue.sql` | Revenue by borough vs city average | ~29ms |
+| `q2_peak_hours.sql` | Trip volume by hour with 3-hour rolling average | ~894ms |
+| `q3_consecutive_gap_analysis.sql` | LAG() gap detection over 35.5M rows | **2.5 seconds**, 65,735 rows |
+
+---
+
+### Step 8 -- Run PySpark Historical Processing 2009-2023 (Bonus)
+
+**Recommended: Kaggle Notebook (free, no local setup)**
+
+1. Go to [kaggle.com](https://www.kaggle.com/) and sign in.
+2. Click **+ New Notebook** (top-right button).
+3. In the notebook: **File -> Import Notebook** -> upload `spark/kaggle_historical_demo.ipynb` from this repo.
+4. Leave the **Internet** toggle **OFF** (not needed -- data is generated inline).
+5. Click **Run All** and wait ~3 minutes.
+
+Expected output:
+```
+Generating synthetic 2009-2023 trip data...
+Raw rows written: 150,000
+
+After filtering: 20,148 rows
+
+Trips per year:
+2009: 1,367  | 2010: 1,381  | 2011: 1,276  | 2012: 1,347  | 2013: 1,343
+2014: 1,431  | 2015: 1,349  | 2016: 1,280  | 2017: 1,340  | 2018: 1,361
+2019: 1,354  | 2020: 1,361  | 2021: 1,332  | 2022: 1,319  | 2023: 1,307
+
+Done. Output written to /kaggle/working/agg_daily_revenue/
+Parquet files written: 362 (partitioned by year/month)
+```
+
+> **Why synthetic data?** Kaggle blocks downloads from the NYC TLC CDN. The notebook generates 150,000 rows spanning 2009-2023 inline (`random.seed(42)` for reproducibility). The PySpark logic -- mergeSchema, broadcast join, F.nullif(), repartition + partitionBy -- is identical to what runs on real data on AWS EMR or Glue.
+
+**Local run** (requires Java 17+):
 ```bash
 pip install pyspark
 spark-submit spark/process_historical.py \
@@ -160,20 +338,6 @@ spark-submit spark/process_historical.py \
 **AWS production:**
 - EMR: `spark-submit --deploy-mode cluster --master yarn spark/process_historical.py`
 - Glue: Replace `SparkSession` with `GlueContext`; output via `write_dynamic_frame_from_options` with `partitionKeys=[year, month]`
-
-**Verified Kaggle run (actual output):**
-
-```
-Raw rows:        150,000
-After filtering:  20,148  (same rules as dbt models)
-
-Trips per year:
-2009: 1,367  | 2010: 1,381  | 2011: 1,276  | 2012: 1,347  | 2013: 1,343
-2014: 1,431  | 2015: 1,349  | 2016: 1,280  | 2017: 1,340  | 2018: 1,361
-2019: 1,354  | 2020: 1,361  | 2021: 1,332  | 2022: 1,319  | 2023: 1,307
-
-Parquet files written: 362 (partitioned by year/month)
-```
 
 ![PySpark Kaggle Run](docs/screenshots/pyspark_kaggle_run.png)
 *PySpark Kaggle run -- 150K rows, all 15 years 2009-2023, 362 partitioned Parquet files*
