@@ -18,8 +18,7 @@ jobs:
 
       - name: Deploy DAGs to Astronomer
         env:
-          ASTRONOMER_KEY_ID: ${{ secrets.ASTRONOMER_KEY_ID }}
-          ASTRONOMER_KEY_SECRET: ${{ secrets.ASTRONOMER_KEY_SECRET }}
+          ASTRONOMER_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
         run: |
           mkdir -p .astro
           echo "context: cloud.astronomer.io" > .astro/config.yaml
