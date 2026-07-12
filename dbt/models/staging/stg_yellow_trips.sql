@@ -2,6 +2,8 @@
   stg_yellow_trips
   ----------------
   Renames columns to snake_case, casts types, adds trip_duration_minutes.
+  Deduplicates on trip_id (MD5 surrogate key) to eliminate exact duplicate
+  source rows before downstream models consume the data.
   Does NOT filter invalid rows here — filtering happens in int_trips_enriched
   so we have full visibility of raw data quality.
 */
@@ -42,7 +44,6 @@ renamed as (
         cast(total_amount as double)      as total_amount,
 
         -- derived: duration in fractional minutes
-        -- DuckDB: datediff('minute', ...) / Snowflake: datediff('minute', ...)
         datediff(
             'minute',
             cast(tpep_pickup_datetime as timestamp),
@@ -50,6 +51,15 @@ renamed as (
         ) as trip_duration_minutes
 
     from source
+),
+
+deduplicated as (
+    select *
+    from renamed
+    qualify row_number() over (
+        partition by trip_id
+        order by pickup_datetime desc
+    ) = 1
 )
 
-select * from renamed
+select * from deduplicated
