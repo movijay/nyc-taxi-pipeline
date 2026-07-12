@@ -21,7 +21,7 @@ jobs:
           ASTRONOMER_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
         run: |
           # Login using token (CI/CD mode — bypasses browser)
-          echo "$ASTRONOMER_API_TOKEN" | astro login cloud.astronomer.io --token-login
+          astro login cloud.astronomer.io --token-login "$ASTRONOMER_API_TOKEN"
           # Create Astro project marker
           mkdir -p .astro
           echo "context: cloud.astronomer.io" > .astro/config.yaml
