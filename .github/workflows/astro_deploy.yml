@@ -20,27 +20,10 @@ jobs:
         env:
           ASTRONOMER_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
         run: |
-          # Write Astro CLI auth config
-          python3 -c "
-          import os, pathlib
-          token = os.environ['ASTRONOMER_API_TOKEN']
-          workspace = 'cmrf9nhxu4itb01naaus61yoc'
-          lines = [
-            'context: cloud.astronomer.io',
-            'contexts:',
-            '  cloud.astronomer.io:',
-            '    domain: cloud.astronomer.io',
-            '    token: ' + token,
-            '    workspace: ' + workspace,
-            '    last_used_workspace: ' + workspace,
-          ]
-          p = pathlib.Path.home() / '.astro'
-          p.mkdir(exist_ok=True)
-          (p / 'config.yaml').write_text('\n'.join(lines) + '\n')
-          print('Auth config written')
-          "
+          # Login using token (CI/CD mode — bypasses browser)
+          echo "$ASTRONOMER_API_TOKEN" | astro login cloud.astronomer.io --token-login
           # Create Astro project marker
           mkdir -p .astro
           echo "context: cloud.astronomer.io" > .astro/config.yaml
-          # Deploy
+          # Deploy DAGs only
           astro deploy cmrfaz23f4la501nvg87gfssw --dags --force --workspace-id cmrf9nhxu4itb01naaus61yoc
