@@ -19,7 +19,7 @@ from prefect import flow, task, get_run_logger
 DBT_API_TOKEN  = "dbtu_sGCpDMUe5sVwrFcQgjTyOPGiQD3vFzF32cod8_4qIUnVP5oLkg"   # ← only line to fill in
 DBT_ACCOUNT_ID = "70506183148293"
 DBT_JOB_ID     = "70506183134965"
-DBT_BASE_URL   = f"https://us1.dbt.com/api/v2/accounts/{DBT_ACCOUNT_ID}"
+DBT_BASE_URL   = f"https://ej165.us1.dbt.com/api/v2/accounts/{DBT_ACCOUNT_ID}"
 
 HEADERS = {
     "Authorization": f"Token {DBT_API_TOKEN}",
